@@ -407,6 +407,25 @@ class TestExternalRolloutValidation:
         assert args.rollout_external is False
 
 
+class TestPrecomputedAdvantageValidation:
+    def _parse(self, extra):
+        return get_megatron_arg_parser().parse_args(extra + ["--num-rollout", "1"] + REQUIRED_ARGS)
+
+    def test_the_precomputed_estimator_is_accepted(self):
+        args = self._parse(["--advantage-estimator", "precomputed"])
+
+        miles_validate_args(args)
+
+        assert args.advantage_estimator == "precomputed"
+
+    def test_precomputed_is_rejected_when_advantages_are_not_computed(self):
+        """The samples' token_advantages are read only by the advantage computation the flag skips."""
+        args = self._parse(["--advantage-estimator", "precomputed", "--disable-compute-advantages-and-returns"])
+
+        with pytest.raises(AssertionError, match="which --disable-compute-advantages-and-returns skips"):
+            miles_validate_args(args)
+
+
 class TestEventDirectoryDefaults:
     @staticmethod
     def _parse(extra: list[str]) -> argparse.Namespace:

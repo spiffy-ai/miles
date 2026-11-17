@@ -66,6 +66,14 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         bv = bv if bv is not None else [0.0] * b.response_length
         return av + [0.0] * obs_len + bv
 
+    def _merge_token_advantages():
+        # Unlike the OPD fields, a turn without advantages is not zero-filled: that would silently train it at
+        # advantage 0. Both turns carry them or neither does; the observation span between them is loss-masked.
+        assert (a.token_advantages is None) == (
+            b.token_advantages is None
+        ), "cannot merge: token_advantages must be set on both samples or on neither"
+        return _merge_optional_per_token("token_advantages")
+
     def _pop_opd_student_top_logprobs(metadata):
         if metadata is None:
             return None, None
@@ -177,6 +185,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             rollout_sampling_mask=sampling_mask,
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
+            token_advantages=_merge_token_advantages(),
             rollout_routed_experts=b.rollout_routed_experts,
             rollout_indexer_topk=b.rollout_indexer_topk,
             rollout_store_plan=store_plan,

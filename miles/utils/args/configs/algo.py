@@ -135,10 +135,13 @@ class AlgoConfig(BaseConfig):
     advantage_estimator: A[
         str,
         Arg(
-            choices=["grpo", "gspo", "reinforce_plus_plus", "reinforce_plus_plus_baseline", "ppo"],
+            choices=["grpo", "gspo", "reinforce_plus_plus", "reinforce_plus_plus_baseline", "ppo", "precomputed"],
             help=(
                 "Advantage estimator to use. Note: on-policy distillation (OPD) is now orthogonal "
-                "to the advantage estimator. Use --opd-kl-coef > 0 to enable OPD on top of any estimator."
+                "to the advantage estimator. Use --opd-kl-coef > 0 to enable OPD on top of any estimator. "
+                "precomputed trains on per-token advantages that the rollout side sets on every sample "
+                "(Sample.token_advantages), e.g. from --custom-reward-post-process-path, with no further "
+                "normalization unless --normalize-advantages is set."
             ),
         ),
     ] = "grpo"

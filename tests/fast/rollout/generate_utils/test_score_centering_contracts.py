@@ -160,6 +160,11 @@ def test_filtered_session_support_does_not_use_top_logprobs_router_cap(session: 
     )
 
 
+def test_precomputed_advantages_are_accepted() -> None:
+    """Score centering reads per-token advantages, so the rollout side may supply them."""
+    validate_score_centering_args(_args(advantage_estimator="precomputed"))
+
+
 def test_other_losses_do_not_require_score_centering_router() -> None:
     validate_score_centering_args(
         _args(loss_type="policy_loss", use_session_server="v2", rollout_top_logprobs_num=128, router="sglang")

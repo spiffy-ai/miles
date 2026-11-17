@@ -24,6 +24,7 @@ def compute_advantages(
     response_lengths: list[int],
     values: list[torch.Tensor] | None = None,
     max_seq_lens: list[int] | None = None,
+    token_advantages: list[torch.Tensor] | None = None,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     """Dispatch to the configured advantage estimator.
 
@@ -44,6 +45,8 @@ def compute_advantages(
         response_lengths: List length `B`; `response_lengths[i] = R_i`.
         values: `None` or list length `B`; `values[i]` has shape `[C_i]`. PPO requires this input.
         max_seq_lens: `None` or list length `B`; `max_seq_lens[i] = P_i`. Required for BSHD with CP.
+        token_advantages: `None` or list length `B`; `token_advantages[i]` has shape `[C_i]`, already sliced to
+            this CP rank. `precomputed` requires it and uses it as the advantages unchanged.
 
     `C_i = R_i` when CP size is 1. With CP size greater than 1, `0 <= C_i <= R_i`; `C_i` can be zero and can differ across ranks. THD partitions a sequence of length `T_i`, while BSHD partitions the padded maximum sequence length, so the two formats do not guarantee the same `C_i`.
 
@@ -56,6 +59,11 @@ def compute_advantages(
         returns = get_grpo_returns(rewards, kl)
         # TODO: is the copy necessary?
         advantages = [r for r in returns]
+
+    elif args.advantage_estimator == "precomputed":
+        advantages = _precomputed_advantages(token_advantages, kl)
+        # separate lists, as for grpo: OPD replaces advantages[i] and must leave returns as they were
+        returns = list(advantages)
 
     elif args.advantage_estimator == "ppo":
         terminal_rewards = rewards
@@ -104,6 +112,23 @@ def compute_advantages(
         raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
 
     return advantages, returns
+
+
+def _precomputed_advantages(token_advantages: list[torch.Tensor] | None, kl: list[torch.Tensor]) -> list[torch.Tensor]:
+    """The rollout side's per-token advantages, on the KL tensors' device and dtype. Like `grpo`, the estimator
+    adds no reward-level KL; `kl` only gives each sample's local shape."""
+    if token_advantages is None:
+        raise ValueError("--advantage-estimator precomputed needs token_advantages in the rollout data")
+    if len(token_advantages) != len(kl):
+        raise ValueError(f"token_advantages has {len(token_advantages)} samples, the batch has {len(kl)}")
+    advantages = []
+    for i, (values, reference) in enumerate(zip(token_advantages, kl, strict=True)):
+        if values.shape != reference.shape:
+            raise ValueError(
+                f"token_advantages of sample {i} has shape {tuple(values.shape)}, its response {tuple(reference.shape)}"
+            )
+        advantages.append(values.to(device=reference.device, dtype=torch.float32))
+    return advantages
 
 
 def normalize_advantages(

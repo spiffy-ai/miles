@@ -55,7 +55,8 @@ def compute_advantages_and_returns(
     This function extracts rewards, log-probs, values, and masks from
     `rollout_data`, computes KL divergences, then applies the chosen advantage
     estimator. Supported methods: "grpo", "gspo", "ppo", "reinforce_plus_plus",
-    and "reinforce_plus_plus_baseline". On-policy distillation (OPD) is applied
+    "reinforce_plus_plus_baseline", and "precomputed" (per-token advantages set on
+    the rollout side, `rollout_data["token_advantages"]`). On-policy distillation (OPD) is applied
     orthogonally on top of any estimator via `args.use_opd`. When
     `args.normalize_advantages` is True, advantages are whitened across the
     data-parallel group using masked statistics.
@@ -99,6 +100,7 @@ def compute_advantages_and_returns(
     _detach_rollout_tensor_list(rollout_data, "rollout_log_probs")
     _detach_rollout_tensor_list(rollout_data, "ref_log_probs")
     _detach_rollout_tensor_list(rollout_data, "teacher_log_probs")
+    _detach_rollout_tensor_list(rollout_data, "token_advantages")
     log_probs = rollout_data.get(log_probs_key)
     ref_log_probs = rollout_data.get("ref_log_probs")
 
@@ -131,6 +133,7 @@ def compute_advantages_and_returns(
         response_lengths=response_lengths,
         max_seq_lens=max_seq_lens,
         values=values,
+        token_advantages=rollout_data.get("token_advantages"),
     )
 
     # Apply on-policy distillation KL penalty to advantages (orthogonal to advantage estimator)

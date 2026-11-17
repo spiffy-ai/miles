@@ -22,8 +22,11 @@ def validate_score_centering_args(args: Namespace) -> None:
         temperature=args.rollout_temperature,
         candidate_count=args.rollout_top_logprobs_num,
     )
-    if args.advantage_estimator != "grpo":
-        raise ValueError("Score centering currently supports --advantage-estimator grpo (group-centered rewards)")
+    if args.advantage_estimator not in ("grpo", "precomputed"):
+        raise ValueError(
+            "Score centering currently supports --advantage-estimator grpo (group-centered rewards) or "
+            "precomputed (per-token advantages from the rollout side)"
+        )
     incompatible = {
         "use_tis": "use --score-centering-is instead",
         "custom_tis_function_path": "only the built-in score-centering TIS/MIS weights are supported",

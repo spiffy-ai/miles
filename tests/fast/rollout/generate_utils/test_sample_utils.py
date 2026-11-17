@@ -228,6 +228,33 @@ class TestMergeSamples:
 
         numpy.testing.assert_array_equal(merged.rollout_indexer_topk, b.rollout_indexer_topk)
 
+    def test_merge_concatenates_token_advantages_with_zeros_over_the_observation(self, mock_tokenizer):
+        a = make_sample(tokens=[1, 2, 10, 11], response_length=2, loss_mask=[1, 1])
+        b = make_sample(tokens=[1, 2, 10, 11, 20, 30], response_length=1, loss_mask=[1])
+        a.token_advantages = [0.5, -1.0]
+        b.token_advantages = [2.0]
+
+        merged = _merge_sample_pair(a, b, mock_tokenizer)
+
+        assert merged.loss_mask == [1, 1, 0, 1]
+        assert merged.token_advantages == [0.5, -1.0, 0.0, 2.0]
+
+    def test_merge_keeps_token_advantages_none_when_neither_turn_has_them(self, mock_tokenizer):
+        a = make_sample(tokens=[1, 2, 10], response_length=1, loss_mask=[1])
+        b = make_sample(tokens=[1, 2, 10, 20, 30], response_length=1, loss_mask=[1])
+
+        assert _merge_sample_pair(a, b, mock_tokenizer).token_advantages is None
+
+    @pytest.mark.parametrize("first_has_them", [True, False])
+    def test_merge_rejects_token_advantages_on_one_turn_only(self, mock_tokenizer, first_has_them: bool):
+        """Zero-filling the other turn, as the OPD fields do, would train it at advantage 0."""
+        a = make_sample(tokens=[1, 2, 10], response_length=1, loss_mask=[1])
+        b = make_sample(tokens=[1, 2, 10, 20, 30], response_length=1, loss_mask=[1])
+        (a if first_has_them else b).token_advantages = [1.0]
+
+        with pytest.raises(AssertionError, match="token_advantages must be set on both samples or on neither"):
+            _merge_sample_pair(a, b, mock_tokenizer)
+
     def test_loss_mask_none_defaults_to_all_ones(self, mock_tokenizer):
         a = make_sample(
             tokens=[1, 2, 10],

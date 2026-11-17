@@ -1452,6 +1452,13 @@ def miles_validate_args(args):
 
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
 
+    if args.advantage_estimator == "precomputed":
+        # The estimator runs inside the advantage computation; without it the samples' token_advantages are never read.
+        assert args.compute_advantages_and_returns, (
+            "--advantage-estimator precomputed reads the samples' token_advantages in the advantage computation, "
+            "which --disable-compute-advantages-and-returns skips"
+        )
+
     if args.advantage_estimator in ["reinforce_plus_plus", "reinforce_plus_plus_baseline"]:
         assert args.normalize_advantages, (
             "The 'reinforce_plus_plus' and 'reinforce_plus_plus_baseline' advantage estimators "

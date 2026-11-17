@@ -37,6 +37,7 @@ ROLLOUT_DATA_TENSOR_DTYPES = {
     "rollout_sampling_mask_offsets": "int64",
     "teacher_log_probs": "float32",
     "opd_reverse_kl": "float32",
+    "token_advantages": "float32",
     "rollout_routed_experts": "int32",
     "rollout_indexer_topk": "int32",
 }
@@ -227,12 +228,34 @@ def convert_samples_to_train_data(
     if samples[0].opd_reverse_kl is not None:
         train_data["opd_reverse_kl"] = [sample.opd_reverse_kl for sample in samples]
 
+    if (token_advantages := _token_advantages_column(args, samples)) is not None:
+        train_data["token_advantages"] = token_advantages
+
     x = metadata.get("dynamic_global_batch_size")
     assert args.use_dynamic_global_batch_size == (x is not None)
     if x is not None:
         train_data["dynamic_global_batch_size"] = x
 
     return train_data
+
+
+def _token_advantages_column(args, samples: list[Sample]) -> list[list[float]] | None:
+    """The samples' per-token advantages: required on every sample by --advantage-estimator precomputed, and
+    refused by every other estimator, which would ignore them."""
+    missing = [sample.index for sample in samples if sample.token_advantages is None]
+    if args.advantage_estimator == "precomputed":
+        if missing:
+            raise ValueError(
+                "--advantage-estimator precomputed needs token_advantages on every sample; "
+                f"{len(missing)} of {len(samples)} have none (sample indices {missing[:8]})"
+            )
+        return [sample.token_advantages for sample in samples]
+    if len(missing) != len(samples):
+        raise ValueError(
+            f"{len(samples) - len(missing)} samples carry token_advantages, which only --advantage-estimator "
+            f"precomputed trains on; --advantage-estimator {args.advantage_estimator} would ignore them"
+        )
+    return None
 
 
 def _check_store_plans(args, samples: list[Sample]) -> None:
@@ -533,6 +556,7 @@ def _package_shards(args, data: dict[str, Any], partitions) -> list[dict[str, An
             "prompt",
             "teacher_log_probs",
             "opd_reverse_kl",
+            "token_advantages",
             "seq_witness_ids",
             "weight_versions",
             "adapter_slots",

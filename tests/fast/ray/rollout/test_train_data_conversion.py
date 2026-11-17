@@ -177,6 +177,57 @@ class TestConvertSamplesToTrainData:
         )
         assert out["rollout_log_probs"][0] == [-0.1, -0.2, -0.3, -0.4]
 
+    def test_precomputed_estimator_passes_token_advantages_through(self):
+        args = make_args(advantage_estimator="precomputed", rewards_normalization=False)
+        samples = [make_sample(index=0), make_sample(index=1)]
+        samples[0].token_advantages = [0.5, -1.0, 0.0, 2.0]
+        samples[1].token_advantages = [-0.25, -0.25, 1.5, 1.5]
+        out = convert_samples_to_train_data(
+            args,
+            samples,
+            metadata={},
+            custom_convert_samples_to_train_data_func=None,
+            custom_reward_post_process_func=None,
+        )
+        assert out["token_advantages"] == [[0.5, -1.0, 0.0, 2.0], [-0.25, -0.25, 1.5, 1.5]]
+
+    def test_precomputed_estimator_rejects_a_sample_without_token_advantages(self):
+        args = make_args(advantage_estimator="precomputed", rewards_normalization=False)
+        samples = [make_sample(index=0), make_sample(index=7)]
+        samples[0].token_advantages = [0.0, 0.0, 0.0, 0.0]
+        with pytest.raises(ValueError, match=r"1 of 2 have none \(sample indices \[7\]\)"):
+            convert_samples_to_train_data(
+                args,
+                samples,
+                metadata={},
+                custom_convert_samples_to_train_data_func=None,
+                custom_reward_post_process_func=None,
+            )
+
+    def test_other_estimators_reject_token_advantages_they_would_ignore(self):
+        args = make_args(advantage_estimator="grpo", rewards_normalization=False)
+        s = make_sample()
+        s.token_advantages = [1.0, 1.0, 1.0, 1.0]
+        with pytest.raises(ValueError, match="--advantage-estimator grpo would ignore them"):
+            convert_samples_to_train_data(
+                args,
+                [s],
+                metadata={},
+                custom_convert_samples_to_train_data_func=None,
+                custom_reward_post_process_func=None,
+            )
+
+    def test_no_token_advantages_column_without_the_field(self):
+        args = make_args(rewards_normalization=False)
+        out = convert_samples_to_train_data(
+            args,
+            [make_sample()],
+            metadata={},
+            custom_convert_samples_to_train_data_func=None,
+            custom_reward_post_process_func=None,
+        )
+        assert "token_advantages" not in out
+
     def test_sampling_mask_passed_through(self):
         args = make_args(rewards_normalization=False)
         s = make_sample()
@@ -922,6 +973,29 @@ class TestSplitTrainDataByDp:
             assert p["raw_reward"] == [9.0, 8.0, 7.0, 6.0]
             assert p["dynamic_global_batch_size"] == 4
 
+    def test_token_advantages_survive_the_object_store_as_float32(self, ray_local_mode: None) -> None:
+        args = make_args(balance_data=False)
+        data = {
+            "tokens": [[1, 2, 3, 4, 5], [1, 2, 3]],
+            "response_lengths": [3, 1],
+            "rewards": [0, 0],
+            "truncated": [0, 0],
+            "loss_masks": [[1, 0, 1], [1]],
+            "sample_indices": [0, 1],
+            "token_advantages": [[0.5, 0.0, -1.25], [3.0]],
+        }
+
+        [shard] = split_train_data_by_dp(
+            args=args, data=data, train_parallel_config=make_train_parallel_config(dp_size=1)
+        )
+        store = RayObjectStore(frees_objects=False)
+        ref = store.put(value=shard, value_spec=ROLLOUT_DATA_VALUE_SPEC)
+        with store.get(ref) as part:
+            got = [torch.as_tensor(values) for values in part["token_advantages"]]
+        assert [t.dtype for t in got] == [torch.float32, torch.float32]
+        torch.testing.assert_close(got[0], torch.tensor([0.5, 0.0, -1.25]))
+        torch.testing.assert_close(got[1], torch.tensor([3.0]))
+
     def test_weight_versions_survive_the_object_store_with_their_prefill_spans(self, ray_local_mode: None) -> None:
         """Per-call prefill spans reach a DP shard through the store and read back as the same typed calls."""
         args = make_args(balance_data=False)
@@ -1040,6 +1114,22 @@ class TestSplitTrainDataRaw:
         for part in result:
             assert len(part["rollout_indexer_topk"]) == 2
             assert len(part["opd_reverse_kl"]) == 2
+
+    def test_token_advantages_split_across_dp_with_their_samples(self) -> None:
+        data = {
+            "tokens": [[1, 2], [3, 4], [5, 6], [7, 8]],
+            "response_lengths": [1, 1, 1, 1],
+            "loss_masks": [[0, 1], [0, 1], [0, 1], [0, 1]],
+            "token_advantages": [[float(i)] for i in range(4)],
+        }
+
+        args = MagicMock()
+        args.balance_data = False
+
+        result = split_train_data_by_dp_raw(args=args, data=data, dp_size=2)
+
+        for part in result:
+            assert part["token_advantages"] == [[float(i)] for i in part["partition"]]
 
     def test_no_witness_ids_when_absent(self) -> None:
         tokens = [[1, 2], [3, 4]]
